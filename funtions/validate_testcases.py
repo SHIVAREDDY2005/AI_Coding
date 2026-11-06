@@ -1,80 +1,145 @@
 import ast
-import ast
+import json
+import os
+import sys
+from dotenv import load_dotenv
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+from funtions.usercode_evaluation import (
+    JUDGE0_HEADERS,
+    JUDGE0_URL,
+    PythonHarness,
+    detect_func_name,
+    submit_to_judge0,
+)
+
+load_dotenv()
+
 
 def parse_testcases(raw_text):
-    # If already list → return directly
+    """
+    Parses test cases from a Python list, JSON string, or newline-delimited string.
+    """
     if isinstance(raw_text, list):
         return raw_text
 
-    # If string → parse it
+    if not isinstance(raw_text, str):
+        return []
+
+    cleaned = raw_text.strip()
+    # Try parsing as JSON first
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and "testcases" in data:
+            return data["testcases"]
+    except Exception:
+        pass
+
+    # Try parsing line-by-line (json or literal python dicts)
     cases = []
-    for line in raw_text.strip().split("\n"):
+    for line in cleaned.split("\n"):
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
+            cases.append(json.loads(line))
+        except Exception:
             try:
                 cases.append(ast.literal_eval(line))
             except Exception as e:
-                print("❌ Parse error:", line)
+                print("[ERROR] Parse error on testcase line:", line, e)
+
     return cases
 
-def validate_testcases(brute_code, optimal_code, testcases):
+
+def validate_testcases(
+    brute_code: str,
+    optimal_code: str,
+    testcases,
+    judge0_url: str = JUDGE0_URL,
+    judge0_headers: dict = None
+):
+    """
+    Validates test cases by running the brute force and optimal solutions
+    through Judge0 in a sandboxed environment.
+
+    NO code is executed locally on the host machine.
+    """
+    if judge0_headers is None:
+        judge0_headers = JUDGE0_HEADERS
+
     parse_cases = parse_testcases(testcases)
-    # -------- Load functions dynamically --------
-    def load_function(code_str, func_name):
-        local_scope = {}
-        try:
-            exec(code_str, {}, local_scope)
-            return local_scope.get(func_name)
-        except Exception as e:
-            print(f"❌ Error loading {func_name}: {e}")
-            return None
-
-    brute_func = load_function(brute_code, "bruteforce_solve")
-    optimal_func = load_function(optimal_code, "optimal_solve")
-
-    if not brute_func or not optimal_func:
-        print("❌ Failed to load functions")
+    if not parse_cases:
+        print("[ERROR] No test cases to validate")
         return []
+
+    if not brute_code or not optimal_code:
+        print("[ERROR] Both brute force and optimal code are required for validation")
+        return []
+
+    harness = PythonHarness()
+    brute_fn = detect_func_name(brute_code, 71) or "bruteforce_solve"
+    opt_fn = detect_func_name(optimal_code, 71) or "optimal_solve"
 
     valid_cases = []
     failed_cases = []
 
-    # -------- Normalize output (order-independent if needed) --------
-    def normalize(x):
-        if isinstance(x, list):
-            return sorted(x)
-        return x
-
-    # -------- Execute testcases --------
     for case in parse_cases:
         try:
-            inp = case["input"]
-            expected = case["expected_output"]
+            inp = case.get("input")
+            expected = case.get("expected_output", case.get("expected"))
 
-            # 🔥 Support ANY input format
-            if isinstance(inp, dict):
-                brute_out = brute_func(**inp)
-                opt_out = optimal_func(**inp)
-            elif isinstance(inp, list):
-                brute_out = brute_func(*inp)
-                opt_out = optimal_func(*inp)
-            else:
-                brute_out = brute_func(inp)
-                opt_out = optimal_func(inp)
+            keys = list(inp.keys()) if isinstance(inp, dict) else []
+            stdin_payload = json.dumps(inp)
 
-            # normalize outputs
-            brute_out_n = normalize(brute_out)
-            opt_out_n = normalize(opt_out)
-            expected_n = normalize(expected)
+            # Build harnesses for both solutions
+            brute_wrapped = harness.build(brute_code, keys, inp, brute_fn)
+            opt_wrapped = harness.build(optimal_code, keys, inp, opt_fn)
 
-            # -------- Validation --------
-            if brute_out_n == expected_n and opt_out_n == expected_n:
+            # Submit brute solution to Judge0
+            brute_res = submit_to_judge0(brute_wrapped, 71, stdin_payload, url=judge0_url, headers=judge0_headers)
+            brute_status = brute_res.get("status", {}).get("description")
+
+            if brute_status != "Accepted":
+                failed_cases.append({
+                    "case": case,
+                    "reason": f"Brute solution failed with {brute_status}",
+                    "error": brute_res.get("stderr") or brute_res.get("compile_output")
+                })
+                continue
+
+            # Submit optimal solution to Judge0
+            opt_res = submit_to_judge0(opt_wrapped, 71, stdin_payload, url=judge0_url, headers=judge0_headers)
+            opt_status = opt_res.get("status", {}).get("description")
+
+            if opt_status != "Accepted":
+                failed_cases.append({
+                    "case": case,
+                    "reason": f"Optimal solution failed with {opt_status}",
+                    "error": opt_res.get("stderr") or opt_res.get("compile_output")
+                })
+                continue
+
+            # Parse outputs
+            brute_out = json.loads(brute_res.get("stdout", "").strip())
+            opt_out = json.loads(opt_res.get("stdout", "").strip())
+
+            # Verify against expected
+            if brute_out == expected and opt_out == expected:
                 valid_cases.append(case)
             else:
                 failed_cases.append({
                     "case": case,
-                    "brute": brute_out,
-                    "optimal": opt_out
+                    "expected": expected,
+                    "brute_output": brute_out,
+                    "optimal_output": opt_out
                 })
 
         except Exception as e:
@@ -83,48 +148,28 @@ def validate_testcases(brute_code, optimal_code, testcases):
                 "error": str(e)
             })
 
-    print(f"✅ Valid: {len(valid_cases)} | ❌ Failed: {len(failed_cases)}")
-
+    print(f"[OK] Valid testcases: {len(valid_cases)} | [FAIL] Failed testcases: {len(failed_cases)}")
     return valid_cases
 
-# brute_code = """def bruteforce_solve(nums, target):
-#     for i in range(len(nums)):
-#         for j in range(i + 1, len(nums)):
-#             if nums[i] + nums[j] == target:
-#                 return [i, j]"""
-# optimal_code = """def optimal_solve(nums, target):
-#     num_dict = {}
-#     for i, num in enumerate(nums):
-#         complement = target - num
-#         if complement in num_dict:
-#             return [num_dict[complement], i]
-#         num_dict[num] = i"""
-# testcases="""
-# {'input': {'nums': [2, 7, 11, 15], 'target': 9}, 'expected_output': [0, 1]}
-# {'input': {'nums': [3, 2, 4], 'target': 6}, 'expected_output': [1, 2]}
-# {'input': {'nums': [3, 3], 'target': 6}, 'expected_output': [0, 1]}
-# {'input': {'nums': [-1, 0, 1], 'target': 0}, 'expected_output': [0, 2]}
-# {'input': {'nums': [0, 0, 3], 'target': 0}, 'expected_output': [0, 1]}
-# {'input': {'nums': [5, 7, 11, 15], 'target': 12}, 'expected_output': [0, 1]}
-# {'input': {'nums': [1000000000, 1000000000, 1000000000], 'target': 2000000000}, 'expected_output': [0, 1]}
-# {'input': {'nums': [-1000000000, -1000000000, -1000000000], 'target': -2000000000}, 'expected_output': [0, 1]}
-# {'input': {'nums': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'target': 11}, 'expected_output': [0, 9]}
-# {'input': {'nums': [10, 9, 8, 7, 6, 5, 4, 3, 2, 1], 'target': 11}, 'expected_output': [0, 9]}
-# {'input': {'nums': [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000], 'target': 1100}, 'expected_output': [0, 10]}
-# {'input': {'nums': [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100], 'target': 1100}, 'expected_output': [0, 9]}
-# {'input': {'nums': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 'target': 2}, 'expected_output': [0, 1]}
-# {'input': {'nums': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'target': 10}, 'expected_output': [0, 9]}
-# {'input': {'nums': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 'target': 0}, 'expected_output': [0, 1]}
-# {'input': {'nums': [1000000000, 0, 0, 0, 0, 0, 0, 0, 0, 0], 'target': 1000000000}, 'expected_output': [0, 1]}
-# {'input': {'nums': [0, 0, 0, 0, 0, 0, 0, 0, 0, 1000000000], 'target': 1000000000}, 'expected_output': [0, 9]}
-# {'input': {'nums': [1000000000, 1000000000, 0, 0, 0, 0, 0, 0, 0, 0], 'target': 2000000000}, 'expected_output': [0, 1]}
-# {'input': {'nums': [0, 0, 0, 0, 0, 0, 0, 0, 1000000000, 1000000000], 'target': 2000000000}, 'expected_output': [8, 9]}
-# {'input': {'nums': [-1000000000, 1000000000, 0, 0, 0, 0, 0, 0, 0, 0], 'target': 0}, 'expected_output': [0, 1]}
-# {'input': {'nums': [0, 0, 0, 0, 0, 0, 0, 0, -1000000000, 1000000000], 'target': 0}, 'expected_output': [8, 9]}
-# {'input': {'nums': [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000], 'target': 100}, 'expected_output': [0, 0]}
-# {'input': {'nums': [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100], 'target': 1000}, 'expected_output': [0, 0]}"""
-# final=validate_testcases(brute_code, optimal_code,testcases)
-# print("Valid Test Cases:")
-# print(final)
-# for case in final:
-#     print(case)
+
+if __name__ == "__main__":
+    sample_brute = """def bruteforce_solve(nums, target):
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return [i, j]"""
+
+    sample_optimal = """def optimal_solve(nums, target):
+    num_dict = {}
+    for i, num in enumerate(nums):
+        complement = target - num
+        if complement in num_dict:
+            return [num_dict[complement], i]
+        num_dict[num] = i"""
+
+    sample_tests = [
+        {"input": {"nums": [2, 7, 11, 15], "target": 9}, "expected_output": [0, 1]},
+        {"input": {"nums": [3, 2, 4], "target": 6}, "expected_output": [1, 2]}
+    ]
+
+    print("Direct test validation:", validate_testcases(sample_brute, sample_optimal, sample_tests))

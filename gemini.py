@@ -1,41 +1,41 @@
+# Google Gemini & Groq exploratory testing module
+#
 # from google import genai
 # from dotenv import load_dotenv
 # import os
-
-# # Load variables from .env
+#
 # load_dotenv()
-
-# # Get API key
 # api_key = os.getenv("GEMINI_API_KEY_1")
-
 # if not api_key:
 #     raise ValueError("GEMINI_API_KEY not found in .env file")
-
-# # Create Gemini client
 # client = genai.Client(api_key=api_key)
-
-# # List accessible models
 # for model in client.models.list():
 #     print(model.name)
-
 # response = client.models.generate_content(
 #     model="gemini-3.8-flash",
 #     contents="Explain binary search in simple terms."
 # )
-
 # print(response.text)
 
-
-import json
 import os
-import re
-import  sys
 from dotenv import load_dotenv
 from groq import Groq
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
-models = client.models.list()
 
-for model in models.data:
-    print(model.id)
+load_dotenv()
+
+
+def list_groq_models():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        print("GROQ_API_KEY is not set.")
+        return []
+    client = Groq(api_key=api_key)
+    models = client.models.list()
+    return [m.id for m in models.data]
+
+
+if __name__ == "__main__":
+    available = list_groq_models()
+    print("Available Groq Models:")
+    for model_id in available:
+        print(f" - {model_id}")
