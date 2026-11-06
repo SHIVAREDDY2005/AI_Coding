@@ -1,18 +1,34 @@
-from groq import Groq
-from dotenv import load_dotenv
-load_dotenv()
 import os
+import sys
+from dotenv import load_dotenv
+from groq import Groq
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+load_dotenv()
 
 
-# -------- LLM Code Generator --------
 def write_code(
-    client: Groq,
-    problem_text: str,
-    model: str = "openai/gpt-oss-120b"
+    client: Groq = None,
+    problem_text: str = "",
+    model: str = None
 ):
+    """
+    Generates reference Python solutions (Brute Force and Optimal) using Groq LLM.
+    """
+    if not model:
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+    if not client:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            print("[ERROR] GROQ_API_KEY is missing")
+            return None
+        client = Groq(api_key=api_key)
 
     prompt = f"""
 You are a STRICT competitive programming code generator.
@@ -49,26 +65,6 @@ RULES:
 - USE FUNCTION NAME: bruteforce_solve for brute force
 - USE FUNCTION NAME: optimal_solve for optimal solution
 
-IMPORTANT:
-Each solution MUST call its function using:
-
-if __name__ == "__main__":
-    bruteforce_solve()
-
-for the brute force solution.
-
-And:
-
-if __name__ == "__main__":
-    optimal_solve()
-
-for the optimal solution.
-
-The generated code MUST be directly executable when sent to Judge0.
-
-DO NOT only define the functions.
-The functions MUST actually be called.
-
 -------------------------------------
 
 PROBLEM:
@@ -80,22 +76,16 @@ OUTPUT FORMAT (STRICT):
 
 # BRUTE FORCE SOLUTION
 
-def bruteforce_solve():
-    # solution
+def bruteforce_solve(nums, target):
+    # solution logic
     ...
-
-if __name__ == "__main__":
-    bruteforce_solve()
 
 
 # OPTIMAL SOLUTION
 
-def optimal_solve():
-    # solution
+def optimal_solve(nums, target):
+    # solution logic
     ...
-
-if __name__ == "__main__":
-    optimal_solve()
 
 -------------------------------------
 
@@ -103,7 +93,6 @@ FINAL REQUIREMENTS:
 - Return ONLY the two Python solutions.
 - Do NOT add explanations.
 - Do NOT add markdown code fences.
-- Do NOT omit the function calls.
 """
 
     try:
@@ -119,36 +108,32 @@ FINAL REQUIREMENTS:
             max_tokens=1500
         )
 
-        print("✅ Code generation successful")
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if "INVALID_PROBLEM" in content.strip():
+            print("[WARN] Problem description was rejected as invalid/incomplete")
+            return None
+
+        print("[OK] Code generation successful")
+        return content
 
     except Exception as e:
-        print("⚠ API error:", e)
+        print("[WARN] API error:", e)
         return None
 
 
-
-# -------- Test This File Directly --------
-# if __name__ == "__main__":
-
-#     problem = """
-#     Given an integer n, find the sum of its digits.
-
-#     Input:
-#     A single integer n.
-
-#     Constraints:
-#     1 <= n <= 10^9
-
-#     Output:
-#     Print the sum of the digits of n.
-#     """
-
-#     result = write_code(client, problem)
-
-#     print("\n========== GENERATED CODE ==========\n")
-
-#     if result:
-#         print(result)
-#     else:
-#         print("⚠️ Failed to generate solutions")
+if __name__ == "__main__":
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    if GROQ_API_KEY:
+        cli = Groq(api_key=GROQ_API_KEY)
+        sample_problem = """
+Given an integer n, find the sum of its digits.
+Input: A single integer n.
+Constraints: 1 <= n <= 10^9
+Output: Print the sum of the digits of n.
+"""
+        res = write_code(cli, sample_problem, GROQ_MODEL)
+        print("\n========== GENERATED CODE ==========\n")
+        print(res)
+    else:
+        print("Set GROQ_API_KEY in .env to test directly.")
