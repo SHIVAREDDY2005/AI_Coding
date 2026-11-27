@@ -214,6 +214,7 @@ GENERATION RULES:
 - If input is defined as a single integer → generate ONLY integers
 - DO NOT generate strings, arrays, or random formats unless specified
 - Follow constraints strictly
+- Keep array/list/string sizes compact (at most 15 elements) so JSON stays valid and concise
 - All numbers must be plain integers
 - DO NOT use expressions (like 10**9, 2*10^4)
 - Convert everything to actual numeric values
@@ -250,7 +251,7 @@ Generate at least 8 testcases.
                 messages=[{"role": "user", "content": prompt}],
                 model=target_model,
                 temperature=0.6,
-                max_tokens=2000,
+                max_tokens=4000,
             )
             raw = response.choices[0].message.content
         except Exception as e:
