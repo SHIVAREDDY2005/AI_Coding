@@ -18,6 +18,10 @@ def generate_suggestion(
             problem=request.problem,
             user_code=request.user_code,
             eval_result=request.eval_result,
+            language=request.language,
+            testcases=request.testcases,
+            feedback_focus=request.feedback_focus,
+            conversation_history=request.conversation_history,
             model=request.model,
         )
     except LLMServiceError as e:

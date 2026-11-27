@@ -9,40 +9,40 @@ module.exports = {
     extend: {
       colors: {
         primary: {
-          light: '#818cf8',
-          DEFAULT: '#6366f1',
-          dark: '#4f46e5',
+          light: '#ffb84d',
+          DEFAULT: '#ffa116',
+          dark: '#e58e09',
         },
         background: {
           light: '#f4f4f5',
-          DEFAULT: '#0b0f17',
-          dark: '#06090f',
+          DEFAULT: '#0a0a0a',
+          dark: '#050505',
         },
         surface: {
           light: '#ffffff',
-          DEFAULT: '#131924',
-          elevated: '#1a2232',
-          dark: '#0f141d',
+          DEFAULT: '#1a1a1a',
+          elevated: '#282828',
+          dark: '#222222',
         },
         border: {
-          DEFAULT: '#242e42',
-          light: '#334155',
+          DEFAULT: '#2f2f2f',
+          light: '#3e3e3e',
         },
         accent: {
-          DEFAULT: '#10b981',
-          dark: '#059669',
+          DEFAULT: '#2cbb5d',
+          dark: '#249a4c',
         },
         warning: {
-          DEFAULT: '#f59e0b',
+          DEFAULT: '#ffc01e',
           dark: '#d97706',
         },
         danger: {
-          DEFAULT: '#f43f5e',
-          dark: '#e11d48',
+          DEFAULT: '#ef4743',
+          dark: '#dc2626',
         },
         text: {
-          DEFAULT: '#e5e7eb',
-          muted: '#94a3b8',
+          DEFAULT: '#eff1f6',
+          muted: '#9ca3af',
         },
       },
     },

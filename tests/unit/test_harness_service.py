@@ -50,8 +50,22 @@ class TestHarnessService(unittest.TestCase):
         code = "int solve(int n) { return n * 2; }"
         sample = 5
         harness = self.service.build_harness(code, 54, sample)
-        self.assertIn("#include <nlohmann/json.hpp>", harness)
-        self.assertIn("cout << json(result).dump() << endl;", harness)
+        self.assertIn("#include <bits/stdc++.h>", harness)
+        self.assertNotIn("nlohmann/json.hpp", harness)
+        self.assertIn("cout << _json::dump(result) << endl;", harness)
+
+    def test_go_java_csharp_non_dict_harnesses(self):
+        go_harness = self.service.build_harness("func solve(data []int) int { return 0 }", 60, [1, 2, 3])
+        self.assertIn("var data []int", go_harness)
+        self.assertNotIn("type Input struct", go_harness)
+
+        java_harness = self.service.build_harness("public Object solve(int[] data) { return 0; }", 62, [1, 2, 3])
+        self.assertIn("int[] _input = gson.fromJson(br.readLine(), int[].class);", java_harness)
+        self.assertNotIn("JsonObject obj", java_harness)
+
+        cs_harness = self.service.build_harness("public object Solve(int[] data) { return 0; }", 51, [1, 2, 3])
+        self.assertIn("JToken.Parse(Console.ReadLine()).ToObject<int[]>()", cs_harness)
+        self.assertNotIn("JObject.Parse", cs_harness)
 
     def test_unsupported_language_raises_error(self):
         with self.assertRaises(ValueError):

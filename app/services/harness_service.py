@@ -96,12 +96,7 @@ class GoHarness(BaseHarness):
                 f'{k.capitalize()} {self.go_type(types[k])} `json:"{k}"`' for k in keys
             )
             decls = "\n\t".join(f"{k} := inp.{k.capitalize()}" for k in keys)
-            call = f"result := {fn}({', '.join(keys)})"
-        else:
-            fields = 'Data interface{} `json:"data"`'
-            decls = "data := inp.Data"
-            call = f"result := {fn}(data)"
-        return f"""package main
+            return f"""package main
 import ("encoding/json"; "fmt"; "os")
 type Input struct {{ {fields} }}
 {code}
@@ -109,7 +104,18 @@ func main() {{
     var inp Input
     json.NewDecoder(os.Stdin).Decode(&inp)
     {decls}
-    {call}
+    result := {fn}({', '.join(keys)})
+    out, _ := json.Marshal(result)
+    fmt.Println(string(out))
+}}"""
+        go_t = self.go_type(infer_type(sample))
+        return f"""package main
+import ("encoding/json"; "fmt"; "os")
+{code}
+func main() {{
+    var data {go_t}
+    json.NewDecoder(os.Stdin).Decode(&data)
+    result := {fn}(data)
     out, _ := json.Marshal(result)
     fmt.Println(string(out))
 }}"""
@@ -148,8 +154,12 @@ class JavaHarness(BaseHarness):
             types = {k: infer_type(sample[k]) for k in keys}
             parse = "\n        ".join(self.java_parse(k, types[k]) for k in keys)
             call = ", ".join(keys)
+            read_block = f"""JsonObject obj = gson.fromJson(br.readLine(), JsonObject.class);
+        {parse}"""
         else:
-            parse = "Object _input = gson.fromJson(br.readLine(), Object.class);"
+            jtype = self.java_type(infer_type(sample))
+            boxed = {"int": "Integer", "double": "Double", "boolean": "Boolean"}.get(jtype, jtype)
+            read_block = f"{jtype} _input = gson.fromJson(br.readLine(), {boxed}.class);"
             call = "_input"
         return f"""import com.google.gson.*; import java.util.*; import java.io.*;
 public class Main {{
@@ -157,8 +167,7 @@ public class Main {{
     public static void main(String[] args) throws Exception {{
         Gson gson = new Gson();
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        JsonObject obj = gson.fromJson(br.readLine(), JsonObject.class);
-        {parse}
+        {read_block}
         Object result = new Main().{fn}({call});
         System.out.println(gson.toJson(result));
     }}
@@ -169,30 +178,160 @@ class CppHarness(BaseHarness):
     def cpp_type(self, t: dict) -> str:
         if t["base"] == "list":
             return f"vector<{self.cpp_type(t['of'])}>"
-        return {"int": "int", "float": "double", "string": "string", "bool": "bool"}.get(t["base"], "auto")
+        return {"int": "int", "float": "double", "string": "string", "bool": "bool"}.get(t["base"], "int")
 
     def build(self, code: str, keys: list[str], sample: Any, fn: str) -> str:
         if isinstance(sample, dict) and keys:
             types = {k: infer_type(sample[k]) for k in keys}
-            decls = "\n    ".join(f"{self.cpp_type(types[k])} {k} = j[\"{k}\"];" for k in keys)
+            decls = "\n    ".join(
+                f'{self.cpp_type(types[k])} {k} = _json::from_val<{self.cpp_type(types[k])}>(_j.obj["{k}"]);'
+                for k in keys
+            )
             call = ", ".join(keys)
         else:
-            decls = "auto _input = j;"
+            ctype = self.cpp_type(infer_type(sample))
+            decls = f"{ctype} _input = _json::from_val<{ctype}>(_j);"
             call = "_input"
+
         return f"""#include <bits/stdc++.h>
-#include <nlohmann/json.hpp>
-using json = nlohmann::json;
 using namespace std;
+
+namespace _json {{
+struct Val {{
+    enum Type {{ NUL, BOOL, NUM, STR, ARR, OBJ }} type = NUL;
+    bool b = false;
+    double d = 0;
+    long long i = 0;
+    bool is_int = false;
+    string s;
+    vector<Val> arr;
+    map<string, Val> obj;
+}};
+
+struct Parser {{
+    const string& src;
+    size_t pos = 0;
+    void skip() {{ while (pos < src.size() && isspace((unsigned char)src[pos])) ++pos; }}
+    string parse_str() {{
+        ++pos; // skip '"'
+        string out;
+        while (pos < src.size() && src[pos] != '"') {{
+            if (src[pos] == '\\\\' && pos + 1 < src.size()) {{
+                char c = src[++pos];
+                if (c == 'n') out += '\\n';
+                else if (c == 't') out += '\\t';
+                else if (c == 'r') out += '\\r';
+                else out += c;
+            }} else {{
+                out += src[pos];
+            }}
+            ++pos;
+        }}
+        if (pos < src.size()) ++pos;
+        return out;
+    }}
+    Val parse() {{
+        skip();
+        Val v;
+        if (pos >= src.size()) return v;
+        char c = src[pos];
+        if (c == 'n') {{ pos += 4; v.type = Val::NUL; return v; }}
+        if (c == 't') {{ pos += 4; v.type = Val::BOOL; v.b = true; return v; }}
+        if (c == 'f') {{ pos += 5; v.type = Val::BOOL; v.b = false; return v; }}
+        if (c == '"') {{ v.type = Val::STR; v.s = parse_str(); return v; }}
+        if (c == '[') {{
+            v.type = Val::ARR;
+            ++pos; skip();
+            while (pos < src.size() && src[pos] != ']') {{
+                v.arr.push_back(parse());
+                skip();
+                if (pos < src.size() && src[pos] == ',') ++pos;
+                skip();
+            }}
+            if (pos < src.size()) ++pos;
+            return v;
+        }}
+        if (c == '{{') {{
+            v.type = Val::OBJ;
+            ++pos; skip();
+            while (pos < src.size() && src[pos] != '}}') {{
+                skip();
+                string key = parse_str();
+                skip();
+                if (pos < src.size() && src[pos] == ':') ++pos;
+                v.obj[key] = parse();
+                skip();
+                if (pos < src.size() && src[pos] == ',') ++pos;
+                skip();
+            }}
+            if (pos < src.size()) ++pos;
+            return v;
+        }}
+        size_t start = pos;
+        bool has_dot = false;
+        if (src[pos] == '-') ++pos;
+        while (pos < src.size() && (isdigit((unsigned char)src[pos]) || src[pos] == '.' || src[pos] == 'e' || src[pos] == 'E' || src[pos] == '+' || src[pos] == '-')) {{
+            if (src[pos] == '.' || src[pos] == 'e' || src[pos] == 'E') has_dot = true;
+            ++pos;
+        }}
+        string tok = src.substr(start, pos - start);
+        v.type = Val::NUM;
+        if (!has_dot) {{ v.is_int = true; v.i = stoll(tok); v.d = (double)v.i; }}
+        else {{ v.is_int = false; v.d = stod(tok); v.i = (long long)v.d; }}
+        return v;
+    }}
+}};
+
+template <typename T> struct Reader;
+template <> struct Reader<int> {{ static int read(const Val& v) {{ return v.is_int ? (int)v.i : (int)v.d; }} }};
+template <> struct Reader<long long> {{ static long long read(const Val& v) {{ return v.is_int ? v.i : (long long)v.d; }} }};
+template <> struct Reader<double> {{ static double read(const Val& v) {{ return v.is_int ? (double)v.i : v.d; }} }};
+template <> struct Reader<bool> {{ static bool read(const Val& v) {{ return v.b; }} }};
+template <> struct Reader<string> {{ static string read(const Val& v) {{ return v.s; }} }};
+template <typename T> struct Reader<vector<T>> {{
+    static vector<T> read(const Val& v) {{
+        vector<T> res;
+        res.reserve(v.arr.size());
+        for (const auto& item : v.arr) res.push_back(Reader<T>::read(item));
+        return res;
+    }}
+}};
+template <typename T> T from_val(const Val& v) {{ return Reader<T>::read(v); }}
+
+inline string dump(bool v) {{ return v ? "true" : "false"; }}
+inline string dump(int v) {{ return to_string(v); }}
+inline string dump(long long v) {{ return to_string(v); }}
+inline string dump(size_t v) {{ return to_string(v); }}
+inline string dump(double v) {{ ostringstream os; os << v; return os.str(); }}
+inline string dump(const string& s) {{
+    string out = "\\"";
+    for (char c : s) {{
+        if (c == '"' || c == '\\\\') {{ out += '\\\\'; out += c; }}
+        else if (c == '\\n') out += "\\\\n";
+        else out += c;
+    }}
+    return out + "\\"";
+}}
+inline string dump(const char* s) {{ return dump(string(s)); }}
+template <typename T> string dump(const vector<T>& arr) {{
+    string out = "[";
+    for (size_t i = 0; i < arr.size(); ++i) {{
+        if (i) out += ",";
+        out += dump(arr[i]);
+    }}
+    return out + "]";
+}}
+}}
 
 {code}
 
 int main() {{
     string line;
     getline(cin, line);
-    json j = json::parse(line);
+    _json::Val _j = _json::Parser{{line}}.parse();
     {decls}
     auto result = {fn}({call});
-    cout << json(result).dump() << endl;
+    cout << _json::dump(result) << endl;
     return 0;
 }}"""
 
@@ -222,15 +361,17 @@ class CSharpHarness(BaseHarness):
             types = {k: infer_type(sample[k]) for k in keys}
             parse = "\n            ".join(self.cs_parse(k, types[k]) for k in keys)
             call = ", ".join(keys)
+            read_block = f"""JObject obj = JObject.Parse(Console.ReadLine());
+        {parse}"""
         else:
-            parse = "var _input = obj;"
+            cstype = self.cs_type(infer_type(sample))
+            read_block = f"var _input = JToken.Parse(Console.ReadLine()).ToObject<{cstype}>();"
             call = "_input"
         return f"""using System; using Newtonsoft.Json; using Newtonsoft.Json.Linq;
 public class Solution {{
     {code}
     static void Main() {{
-        JObject obj = JObject.Parse(Console.ReadLine());
-        {parse}
+        {read_block}
         var result = new Solution().{fn}({call});
         Console.WriteLine(JsonConvert.SerializeObject(result));
     }}
@@ -265,6 +406,7 @@ class HarnessService:
             62: r"(?:public|private|protected)\s+\S+\s+(\w+)\s*\(",
             54: r"\w[\w<>]*\s+(\w+)\s*\(",
             53: r"\w[\w<>]*\s+(\w+)\s*\(",
+            52: r"\w[\w<>]*\s+(\w+)\s*\(",
             51: r"(?:public|private)\s+\S+\s+(\w+)\s*\(",
         }
 

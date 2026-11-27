@@ -18,6 +18,18 @@ interface LocalSession {
   preview: string;
 }
 
+function extractSessionTitle(content: string): string {
+  const lines = content.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const stripped = line.replace(/^(?:problem(?:\s+statement)?|title)\s*:\s*/i, '').trim();
+    if (!stripped) continue;
+    return stripped.slice(0, 100);
+  }
+  return content.trim().slice(0, 100);
+}
+
 function loadLocalSessions(): LocalSession[] {
   const sessions: LocalSession[] = [];
   try {
@@ -29,7 +41,7 @@ function loadLocalSessions(): LocalSession[] {
         if (id && content.trim()) {
           sessions.push({
             id,
-            preview: content.trim().split('\n')[0].slice(0, 100),
+            preview: extractSessionTitle(content),
           });
         }
       }
@@ -51,6 +63,21 @@ Output Format:
 
 Constraints:
 `;
+
+const EXAMPLE_PROBLEM = `Problem:
+Given an array of integers arr and an integer target, return true if any two numbers in arr add up to target, otherwise return false.
+
+Input Format:
+arr = [1, 2, 3, 4, 5]
+target = 9
+
+Output Format:
+true (boolean)
+
+Constraints:
+2 <= len(arr) <= 100
+0 <= arr[i] <= 1000
+0 <= target <= 2000`;
 
 const HomePage: React.FC = () => {
   const [question, setQuestion] = useState('');
@@ -75,9 +102,29 @@ const HomePage: React.FC = () => {
 
   const insertStructure = () => {
     setQuestion((prev) => {
-      if (!prev.trim()) return STRUCTURE_SCAFFOLD;
-      return `Problem:\n${prev.trim()}\n\nInput Format:\n\n\nOutput Format:\n\n\nConstraints:\n`;
+      const trimmed = prev.trim();
+      if (!trimmed) return STRUCTURE_SCAFFOLD;
+
+      const hasProblem = /^\s*problem(?:\s+statement)?\s*:/im.test(trimmed);
+      const hasInput = /^\s*input(?:\s+format)?\s*:/im.test(trimmed);
+      const hasOutput = /^\s*output(?:\s+format)?\s*:/im.test(trimmed);
+      const hasConstraints = /^\s*constraints?\s*:/im.test(trimmed);
+
+      if (hasProblem && hasInput && hasOutput && hasConstraints) {
+        return prev;
+      }
+
+      let next = hasProblem ? trimmed : `Problem:\n${trimmed}`;
+      if (!hasInput) next += '\n\nInput Format:\n';
+      if (!hasOutput) next += '\n\nOutput Format:\n';
+      if (!hasConstraints) next += '\n\nConstraints:\n';
+      return next;
     });
+    if (error) setError('');
+  };
+
+  const insertExample = () => {
+    setQuestion(EXAMPLE_PROBLEM);
     if (error) setError('');
   };
 
@@ -153,15 +200,26 @@ const HomePage: React.FC = () => {
           <label htmlFor="problem-composer" className="text-xs font-medium text-text-muted">
             Problem Specification
           </label>
-          <button
-            type="button"
-            onClick={insertStructure}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-surface-elevated border border-border text-text-muted hover:text-white hover:border-border-light transition-colors"
-            title="Insert empty section headings to organize your problem"
-          >
-            <LayoutList className="w-3.5 h-3.5 text-primary-light" />
-            Insert Structure
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={insertExample}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/15 border border-primary/30 text-primary-light hover:bg-primary/25 transition-colors"
+              title="Fill a sample problem with named parameters and return type"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Try Example
+            </button>
+            <button
+              type="button"
+              onClick={insertStructure}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-surface-elevated border border-border text-text-muted hover:text-white hover:border-border-light transition-colors"
+              title="Insert section headings with parameter template"
+            >
+              <LayoutList className="w-3.5 h-3.5 text-primary-light" />
+              Insert Structure
+            </button>
+          </div>
         </div>
 
         <textarea
@@ -179,7 +237,12 @@ const HomePage: React.FC = () => {
 
         {/* Readiness checklist for AI test case generation */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 px-1">
-          <span className="text-xs text-text-muted">AI test generation readiness:</span>
+          <span
+            className="text-xs text-text-muted underline decoration-dotted cursor-help"
+            title="The AI generates JSON test cases and the workspace runs your function directly (no input() or print() needed)."
+          >
+            AI test generation readiness:
+          </span>
           {checklistItems.map((item) => (
             <span
               key={item.label}
@@ -195,6 +258,28 @@ const HomePage: React.FC = () => {
               {item.label}
             </span>
           ))}
+        </div>
+
+        {/* Input / Parameter / Return Type Formatting Guide */}
+        <div className="mt-3 p-3 rounded-xl border border-border bg-surface-dark/70 text-xs text-text-muted space-y-1.5">
+          <p className="font-semibold text-text">How to write inputs for automatic function parameters &amp; return types:</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>
+              <strong className="text-text">Parameters:</strong> Name each input using{' '}
+              <code className="px-1 py-0.5 rounded bg-surface-elevated text-primary-light">name = value</code> in{' '}
+              <em>Input Format</em> (e.g. <code className="text-text">arr = [1, 2, 3]</code>,{' '}
+              <code className="text-text">target = 5</code> creates <code className="text-text">solve(arr, target)</code>).
+            </li>
+            <li>
+              <strong className="text-text">Return type:</strong> Show an example value or type in{' '}
+              <em>Output Format</em> (e.g. <code className="text-text">true (boolean)</code>,{' '}
+              <code className="text-text">15 (integer)</code>, or <code className="text-text">[0, 1] (list)</code>).
+            </li>
+            <li>
+              <strong className="text-text">Execution:</strong> Write a function and <code className="text-text">return</code>{' '}
+              the answer — do not use <code className="text-text">input()</code> or <code className="text-text">print()</code>.
+            </li>
+          </ul>
         </div>
 
         {error && (

@@ -34,6 +34,31 @@ def safe_json_parse(raw: str) -> Optional[Any]:
     return None
 
 
+def _extract_partial_testcases(raw: str) -> list[dict[str, Any]]:
+    """
+    Recovers complete testcase objects from a partially truncated JSON response.
+    """
+    if not raw or not isinstance(raw, str):
+        return []
+    decoder = json.JSONDecoder()
+    recovered: list[dict[str, Any]] = []
+    idx = 0
+    while idx < len(raw):
+        brace = raw.find("{", idx)
+        if brace == -1:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(raw, brace)
+            if isinstance(obj, dict) and "input" in obj:
+                recovered.append(obj)
+                idx = end_idx
+                continue
+        except Exception:
+            pass
+        idx = brace + 1
+    return recovered
+
+
 class LLMService:
     """
     Service responsible for all AI model interactions (Groq / Gemini)
@@ -211,8 +236,9 @@ PROBLEM:
 -------------------------------------
 GENERATION RULES:
 - Input MUST follow the problem definition EXACTLY
-- If input is defined as a single integer → generate ONLY integers
-- DO NOT generate strings, arrays, or random formats unless specified
+- If the problem has multiple input parameters (e.g. n, arr, target), "input" MUST be a JSON object with those parameter names as keys, e.g. {{"n": 5, "arr": [1, 2, 3, 4, 5], "target": 9}}
+- If the problem has a single input parameter (e.g. an integer n or an array nums), use that JSON value directly (e.g. 123 or [1, 2, 3])
+- NEVER pack arrays or multiple inputs into a newline-delimited string like "5\n1 2 3"
 - Follow constraints strictly
 - Keep array/list/string sizes compact (at most 15 elements) so JSON stays valid and concise
 - All numbers must be plain integers
@@ -250,8 +276,9 @@ Generate at least 8 testcases.
             response = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=target_model,
-                temperature=0.6,
-                max_tokens=4000,
+                temperature=0.3,
+                max_tokens=8000,
+                response_format={"type": "json_object"},
             )
             raw = response.choices[0].message.content
         except Exception as e:
@@ -259,7 +286,11 @@ Generate at least 8 testcases.
 
         data = safe_json_parse(raw)
         if data is None:
-            raise LLMServiceError("Failed to parse JSON test cases from model response")
+            partial = _extract_partial_testcases(raw)
+            if partial:
+                data = {"testcases": partial}
+            else:
+                raise LLMServiceError("Failed to parse JSON test cases from model response")
 
         if isinstance(data, dict) and "error" in data:
             raise LLMServiceError(f"Model rejected problem: {data['error']}")
@@ -287,16 +318,41 @@ Generate at least 8 testcases.
         user_code: str,
         eval_result: dict,
         model: Optional[str] = None,
+        language: Optional[str] = None,
+        testcases: Optional[list[dict[str, Any]]] = None,
+        feedback_focus: Optional[str] = None,
+        conversation_history: Optional[list[dict[str, str]]] = None,
     ) -> SuggestionResponse:
         """
-        Analyzes code evaluation results and generates targeted hints without giving away code.
+        Analyzes user code, test cases, and evaluation results to generate
+        targeted debugging or optimization feedback according to the user's request.
         """
         target_model = model or self.settings.GROQ_MODEL
+        lang_label = language or "Not specified"
+        focus_label = (
+            feedback_focus.strip()
+            if feedback_focus and feedback_focus.strip()
+            else "Automatic: diagnose any failing test cases or errors first; if tests pass or have not run yet, review correctness on the test cases and suggest time/space optimizations."
+        )
+        testcases_block = (
+            json.dumps(testcases[:10], indent=2)
+            if testcases
+            else "No test cases provided."
+        )
+        history_block = (
+            "\n".join(
+                f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
+                for m in conversation_history[-6:]
+            )
+            if conversation_history
+            else "None (first message in conversation)."
+        )
 
         prompt = f"""
 You are an expert competitive programming mentor.
 
-Analyze the user's code and identify the issue.
+Analyze the user's ACTUAL written code, the problem statement, the workspace test cases, and the latest execution result.
+Respond directly to what the user asked for in "User Feedback Request", taking into account the prior conversation if any.
 
 ========================
 INPUT
@@ -304,47 +360,63 @@ INPUT
 Problem:
 {problem}
 
+Language: {lang_label}
+
 User Code:
 {user_code}
 
-Result:
-{eval_result}
+Workspace Test Cases (sample):
+{testcases_block}
+
+Latest Execution Result:
+{json.dumps(eval_result, default=str)}
+
+Previous Conversation:
+{history_block}
+
+User Feedback Request:
+{focus_label}
 
 ========================
 OUTPUT (STRICT JSON ONLY)
 ========================
 {{
-  "mistake_type": "...",
-  "issue": "...clear explanation...",
-  "hint": "...specific fix guidance..."
+  "mistake_type": "short category such as logic_error, syntax_error, runtime_error, edge_case, optimization, or code_review",
+  "issue": "clear, accurate assessment referencing the user's actual code and test cases (do NOT invent unrelated bugs if the code is correct)",
+  "hint": "specific, actionable guidance answering the user's feedback request without dumping the complete solution code",
+  "complexity": "estimated current time and space complexity of the user's code",
+  "optimization": "concrete way to optimize time/space complexity or handle edge cases for this specific code and problem"
 }}
 
 ========================
 RULES
 ========================
 - Return ONLY valid JSON
-- No extra text
-- No explanation outside JSON
-- Do NOT give full code
-- Be precise and beginner-friendly
+- No extra text or markdown outside JSON
+- Ground your response strictly in the User Code and Workspace Test Cases above
+- If all tests passed or the user asks for optimization, focus on complexity and optimization instead of inventing bugs
+- Do NOT give full copy-paste solution code
+- Be precise, practical, and tailored to the user's request
 """
         try:
             response = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=target_model,
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=900,
             )
             content = response.choices[0].message.content
         except Exception as e:
             raise LLMServiceError(f"Groq API error during suggestion generation: {str(e)}") from e
 
         parsed = safe_json_parse(content)
-        if isinstance(parsed, dict) and "mistake_type" in parsed:
+        if isinstance(parsed, dict) and ("mistake_type" in parsed or "issue" in parsed or "hint" in parsed):
             return SuggestionResponse(
-                mistake_type=parsed.get("mistake_type", "unknown"),
-                issue=parsed.get("issue", "Review your logic and syntax."),
-                hint=parsed.get("hint", "Examine failed test cases carefully."),
+                mistake_type=str(parsed.get("mistake_type") or "code_review"),
+                issue=str(parsed.get("issue") or "Reviewed your code against the problem and test cases."),
+                hint=str(parsed.get("hint") or "Check edge cases and complexity."),
+                complexity=str(parsed["complexity"]) if parsed.get("complexity") else None,
+                optimization=str(parsed["optimization"]) if parsed.get("optimization") else None,
                 model_used=target_model,
             )
 
