@@ -42,6 +42,9 @@ jobs:
       - name: Run frontend unit tests
         run: npm test
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Build production bundle for GitHub Pages
         env:
           VITE_BASE_PATH: /AI_Coding/
