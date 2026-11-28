@@ -41,7 +41,8 @@ class EmbeddingService:
             return
         try:
             self.cache_db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.cache_db_path) as conn:
+            with sqlite3.connect(self.cache_db_path, timeout=30.0) as conn:
+                conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS embeddings (
@@ -83,7 +84,7 @@ class EmbeddingService:
         # 2. Check SQLite disk cache
         if missing_indices:
             try:
-                with sqlite3.connect(self.cache_db_path) as conn:
+                with self._lock, sqlite3.connect(self.cache_db_path, timeout=30.0) as conn:
                     still_missing: list[int] = []
                     for i in missing_indices:
                         row = conn.execute(
@@ -110,21 +111,22 @@ class EmbeddingService:
                     show_progress_bar=False,
                 )
                 to_persist: list[tuple[str, int, bytes]] = []
-                for idx, vec in zip(missing_indices, encoded):
-                    arr = np.asarray(vec, dtype=np.float32)
-                    k = keys[idx]
-                    self._mem_cache[k] = arr
-                    results[idx] = arr
-                    to_persist.append((k, int(arr.shape[0]), arr.tobytes()))
+                with self._lock:
+                    for idx, vec in zip(missing_indices, encoded):
+                        arr = np.asarray(vec, dtype=np.float32)
+                        k = keys[idx]
+                        self._mem_cache[k] = arr
+                        results[idx] = arr
+                        to_persist.append((k, int(arr.shape[0]), arr.tobytes()))
 
-                try:
-                    with sqlite3.connect(self.cache_db_path) as conn:
-                        conn.executemany(
-                            "INSERT OR REPLACE INTO embeddings (key, dim, vec) VALUES (?, ?, ?)",
-                            to_persist,
-                        )
-                except Exception as e:
-                    logger.warning("Embedding SQLite write error: %s", e)
+                    try:
+                        with sqlite3.connect(self.cache_db_path, timeout=30.0) as conn:
+                            conn.executemany(
+                                "INSERT OR REPLACE INTO embeddings (key, dim, vec) VALUES (?, ?, ?)",
+                                to_persist,
+                            )
+                    except Exception as e:
+                        logger.warning("Embedding SQLite write error: %s", e)
             except Exception as e:
                 logger.warning("SentenceTransformer encoding failed, falling back: %s", e)
 

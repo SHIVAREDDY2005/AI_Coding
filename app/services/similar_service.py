@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ _DISK_CACHE_DIR = Path("data/cache")
 _CF_DISK_CACHE = _DISK_CACHE_DIR / "codeforces_catalog.json"
 _CC_DISK_CACHE = _DISK_CACHE_DIR / "codechef_search_cache.json"
 
+_CACHE_LOCK = threading.Lock()
 _CF_CACHE: dict[str, Any] = {"ts": 0.0, "problems": [], "status": "uninitialized"}
 _CC_CACHE: dict[str, dict[str, Any]] = {}
 _RESULT_CACHE: dict[str, tuple[float, SimilarProblemsResponse]] = {}
@@ -211,9 +213,10 @@ def _load_cc_disk_cache() -> None:
 
 def _save_cc_disk_cache() -> None:
     try:
-        _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        with _CC_DISK_CACHE.open("w", encoding="utf-8") as f:
-            json.dump(_CC_CACHE, f)
+        with _CACHE_LOCK:
+            _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            with _CC_DISK_CACHE.open("w", encoding="utf-8") as f:
+                json.dump(dict(_CC_CACHE), f)
     except Exception:
         pass
 
