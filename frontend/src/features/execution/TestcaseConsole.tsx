@@ -90,7 +90,7 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
   const activeCase = testcases.find((tc) => tc.id === selectedCaseId) ?? testcases[0] ?? null;
 
   return (
-    <div className="flex flex-col bg-surface border border-border rounded-xl overflow-hidden">
+    <div className="flex flex-col h-full bg-surface border border-border rounded-xl overflow-hidden">
       {/* Console Tab Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-surface-dark border-b border-border">
         <div role="tablist" aria-label="Testcase and execution console" className="flex items-center gap-1">
@@ -100,13 +100,13 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
             id="tab-testcases"
             aria-selected={activeTab === 'testcases'}
             onClick={() => setActiveTab('testcases')}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors ${
               activeTab === 'testcases'
                 ? 'text-white bg-surface-elevated'
                 : 'text-text-muted hover:text-text'
             }`}
           >
-            Test Cases ({testcases.length})
+            Testcase ({testcases.length})
           </button>
           <button
             type="button"
@@ -114,13 +114,13 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
             id="tab-results"
             aria-selected={activeTab === 'results'}
             onClick={() => setActiveTab('results')}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5 ${
               activeTab === 'results'
                 ? 'text-white bg-surface-elevated'
                 : 'text-text-muted hover:text-text'
             }`}
           >
-            Execution Results
+            Test Result
             {execResult && (
               <span
                 className={`px-1.5 py-0.5 text-[11px] rounded font-semibold ${
@@ -204,7 +204,7 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
 
       {/* Console Body */}
       {!collapsed && (
-        <div className="p-4 max-h-[420px] overflow-y-auto custom-scrollbar">
+        <div className="p-3.5 flex-1 min-h-0 max-h-[260px] lg:max-h-none overflow-y-auto custom-scrollbar">
           {/* TEST CASES PANEL */}
           <div role="tabpanel" aria-labelledby="tab-testcases" hidden={activeTab !== 'testcases'}>
             {(generationError || validationError) && (
@@ -336,9 +336,9 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
                       <textarea
                         value={activeCase.inputText}
                         onChange={(e) => onUpdateTestcase(activeCase.id, 'inputText', e.target.value)}
-                        rows={4}
+                        rows={3}
                         placeholder='e.g. {"nums": [2, 7, 11, 15], "target": 9} or [1, 2, 3]'
-                        className="w-full p-3 rounded-lg border border-border bg-surface-dark text-text font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full p-2.5 rounded-lg border border-border bg-surface-dark text-text font-mono text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </div>
                     <div>
@@ -359,9 +359,9 @@ export const TestcaseConsole: React.FC<TestcaseConsoleProps> = ({
                       <textarea
                         value={activeCase.expectedText}
                         onChange={(e) => onUpdateTestcase(activeCase.id, 'expectedText', e.target.value)}
-                        rows={4}
+                        rows={3}
                         placeholder='e.g. [0, 1] or 42 or true'
-                        className="w-full p-3 rounded-lg border border-border bg-surface-dark text-text font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full p-2.5 rounded-lg border border-border bg-surface-dark text-text font-mono text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </div>
                   </div>

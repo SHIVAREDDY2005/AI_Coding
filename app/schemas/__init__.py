@@ -18,6 +18,11 @@ from app.schemas.judge import (
     JudgeExecutionResponse,
 )
 from app.schemas.suggestion import SuggestionRequest, SuggestionResponse
+from app.schemas.similar import (
+    SimilarProblemRequest,
+    SimilarProblemItem,
+    SimilarProblemsResponse,
+)
 from app.schemas.pipeline import PipelineRunRequest, PipelineRunResponse
 
 __all__ = [
@@ -37,6 +42,9 @@ __all__ = [
     "JudgeExecutionResponse",
     "SuggestionRequest",
     "SuggestionResponse",
+    "SimilarProblemRequest",
+    "SimilarProblemItem",
+    "SimilarProblemsResponse",
     "PipelineRunRequest",
     "PipelineRunResponse",
 ]

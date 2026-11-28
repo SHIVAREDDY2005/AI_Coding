@@ -1,6 +1,8 @@
-# Core LLM Providers
+# Core LLM & Embedding Providers
 groq>=0.31.0
 google-genai>=2.0.0
+sentence-transformers>=3.0.0
+numpy>=1.26.0
 
 # Environment & Network
 python-dotenv>=1.0.0

@@ -6,9 +6,9 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --scrollbar-thumb: #334155;
-    --scrollbar-track: #0f141d;
-    accent-color: #6366f1;
+    --scrollbar-thumb: #3e3e3e;
+    --scrollbar-track: #1a1a1a;
+    accent-color: #ffa116;
   }
 
   body {
@@ -49,5 +49,5 @@
   content: "";
   position: absolute;
   inset: auto 0 0;
-  border-block-end: 2px solid #6366f1;
+  border-block-end: 2px solid #ffa116;
 }

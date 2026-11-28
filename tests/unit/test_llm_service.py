@@ -78,6 +78,26 @@ def optimal_solve(x): return x
         self.assertEqual(testcases[0].input, 1)
         self.assertEqual(testcases[0].expected_output, 2)
 
+    def test_generate_testcases_recovers_truncated_json(self):
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=(
+                        '{"testcases": ['
+                        '{"input": {"items": [[6, 2]], "budget": 9}, "expected_output": 4}, '
+                        '{"input": {"items": [[2, 3]], "budget": 6}, "expected_output": 2}, '
+                        '{"input": {"items": [[1, 2'
+                    )
+                )
+            )
+        ]
+        self.mock_client.chat.completions.create.return_value = mock_response
+
+        testcases = self.service.generate_testcases("Budget problem")
+        self.assertEqual(len(testcases), 2)
+        self.assertEqual(testcases[0].expected_output, 4)
+
     def test_generate_suggestion_mocked(self):
         mock_response = MagicMock()
         mock_response.choices = [
@@ -97,6 +117,39 @@ def optimal_solve(x): return x
         self.assertEqual(suggestion.mistake_type, "indexing")
         self.assertEqual(suggestion.issue, "0-based vs 1-based indexing")
         self.assertEqual(suggestion.hint, "Subtract 1")
+
+    def test_generate_suggestion_with_testcases_and_optimization_focus(self):
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=(
+                        '{"mistake_type": "optimization", '
+                        '"issue": "Nested loops take O(n^2) on nums", '
+                        '"hint": "Use a hash map to look up complements", '
+                        '"complexity": "Time O(n^2), Space O(1)", '
+                        '"optimization": "Single pass hash map reduces time to O(n)"}'
+                    )
+                )
+            )
+        ]
+        self.mock_client.chat.completions.create.return_value = mock_response
+
+        suggestion = self.service.generate_suggestion(
+            problem="Two Sum",
+            user_code="def solve(nums, target): pass",
+            eval_result={"summary": {"verdict": "All Passed"}},
+            language="Python 3",
+            testcases=[{"input": {"nums": [2, 7], "target": 9}, "expected_output": [0, 1]}],
+            feedback_focus="Optimize to O(n)",
+        )
+        self.assertEqual(suggestion.mistake_type, "optimization")
+        self.assertEqual(suggestion.complexity, "Time O(n^2), Space O(1)")
+        self.assertIn("hash map", suggestion.optimization)
+        sent_prompt = self.mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Python 3", sent_prompt)
+        self.assertIn("Optimize to O(n)", sent_prompt)
+        self.assertIn("target", sent_prompt)
 
 
 if __name__ == "__main__":
