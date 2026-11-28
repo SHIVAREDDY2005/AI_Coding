@@ -1,9 +1,9 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import get_llm_service
+from app.api.deps import get_similar_service
 from app.schemas.similar import SimilarProblemRequest, SimilarProblemsResponse
-from app.services.llm_service import LLMService, LLMServiceError
+from app.services.llm_service import LLMServiceError
 from app.services.similar_service import SimilarProblemsService
 
 router = APIRouter()
@@ -16,10 +16,9 @@ router = APIRouter()
 )
 def find_similar_problems(
     request: SimilarProblemRequest,
-    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+    service: Annotated[SimilarProblemsService, Depends(get_similar_service)],
 ):
     try:
-        service = SimilarProblemsService(llm_service=llm_service)
         return service.find_similar(
             problem=request.problem,
             refresh=request.refresh,
