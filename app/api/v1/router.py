@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, judge, pipeline, solutions, suggestions, testcases
+from app.api.v1.endpoints import health, judge, pipeline, similar, solutions, suggestions, testcases
 
 api_router = APIRouter()
 
@@ -9,3 +9,4 @@ api_router.include_router(testcases.router, prefix="/testcases", tags=["Test Cas
 api_router.include_router(judge.router, prefix="/judge", tags=["Judge & Execution"])
 api_router.include_router(suggestions.router, prefix="/suggestions", tags=["Suggestions"])
 api_router.include_router(pipeline.router, prefix="/pipeline", tags=["Pipeline"])
+api_router.include_router(similar.router, prefix="/problems", tags=["Similar Problems"])

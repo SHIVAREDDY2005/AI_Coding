@@ -17,6 +17,7 @@ import {
   Minimize2,
   FileText,
   Code2,
+  Compass,
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 import LanguageSelector from '../features/editor/LanguageSelector';
@@ -24,16 +25,18 @@ import CodeEditor from '../features/editor/CodeEditor';
 import { TestcaseConsole } from '../features/execution/TestcaseConsole';
 import { ProblemPanel } from '../features/workspace/ProblemPanel';
 import { AiMentorChat } from '../features/workspace/AiMentorChat';
+import { SimilarProblemsPanel } from '../features/workspace/SimilarProblemsPanel';
 import { useLanguages } from '../hooks/useLanguages';
 import { useCodeDraft } from '../hooks/useCodeDraft';
 import { useCodeExecution } from '../hooks/useCodeExecution';
 import { useTestcases } from '../hooks/useTestcases';
 import { useAiMentor } from '../hooks/useAiMentor';
+import { useSimilarProblems } from '../hooks/useSimilarProblems';
 import { useSplitLayout } from '../hooks/useSplitLayout';
 import { buildFunctionTemplate } from '../utils/functionSignature';
 
 type MobileView = 'problem' | 'code' | 'console';
-type LeftTab = 'problem' | 'mentor';
+type LeftTab = 'problem' | 'mentor' | 'similar';
 
 const WorkspacePage: React.FC = () => {
   const { problemId } = useParams<{ problemId: string }>();
@@ -124,7 +127,7 @@ const WorkspacePage: React.FC = () => {
   } = useTestcases(sessionId);
 
   // Code execution via POST /api/v1/judge/evaluate
-  const { run, loading: execLoading, error: execError, result } = useCodeExecution();
+  const { run, loading: execLoading, error: execError, result, reset: resetExecution } = useCodeExecution();
 
   // Explicit AI Help via POST /api/v1/suggestions/generate
   const {
@@ -135,6 +138,16 @@ const WorkspacePage: React.FC = () => {
     requestHelp,
     clearSuggestion,
   } = useAiMentor();
+
+  // Similar problems across LeetCode, CodeChef, Codeforces
+  const {
+    data: similarData,
+    loading: similarLoading,
+    refreshingPlatform,
+    error: similarError,
+    fetchSimilar,
+    resetSimilar,
+  } = useSimilarProblems(sessionId);
 
   const selectedLanguage = languages.find((l) => l.id === selectedLangId) ?? null;
   const autoTemplateRef = useRef<{ key: string; value: string } | null>(null);
@@ -292,12 +305,21 @@ const WorkspacePage: React.FC = () => {
   const saveProblemEdit = () => {
     const trimmed = problemDraft.trim();
     if (!trimmed) return;
+    const changed = trimmed !== question.trim();
     setQuestion(trimmed);
     setEditingProblem(false);
     try {
       localStorage.setItem(`workspace:${sessionId}`, trimmed);
     } catch {
       // Ignore storage errors
+    }
+    if (changed) {
+      clearTestcases();
+      resetExecution();
+      clearSuggestion();
+      resetSimilar();
+      setValidationError(null);
+      lastRunSignatureRef.current = null;
     }
   };
 
@@ -473,6 +495,20 @@ const WorkspacePage: React.FC = () => {
                       />
                     )}
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={leftTab === 'similar'}
+                    onClick={() => setLeftTab('similar')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors inline-flex items-center gap-1.5 ${
+                      leftTab === 'similar'
+                        ? 'bg-surface-elevated text-white'
+                        : 'text-text-muted hover:text-text'
+                    }`}
+                  >
+                    <Compass className="w-3.5 h-3.5 text-primary-light" />
+                    Similar
+                  </button>
                 </div>
 
                 {leftTab === 'problem' ? (
@@ -507,7 +543,7 @@ const WorkspacePage: React.FC = () => {
                       </button>
                     )}
                   </div>
-                ) : (suggestion || aiError) ? (
+                ) : leftTab === 'mentor' && (suggestion || aiError) ? (
                   <button
                     type="button"
                     onClick={clearSuggestion}
@@ -529,7 +565,7 @@ const WorkspacePage: React.FC = () => {
                     onCancelEdit={() => setEditingProblem(false)}
                     onSaveEdit={saveProblemEdit}
                   />
-                ) : (
+                ) : leftTab === 'mentor' ? (
                   <AiMentorChat
                     messages={aiMessages}
                     loading={aiLoading}
@@ -545,6 +581,15 @@ const WorkspacePage: React.FC = () => {
                       triggerAiHelp(modeId);
                     }}
                     onSend={() => triggerAiHelp()}
+                  />
+                ) : (
+                  <SimilarProblemsPanel
+                    problem={question}
+                    data={similarData}
+                    loading={similarLoading}
+                    refreshingPlatform={refreshingPlatform}
+                    error={similarError}
+                    onFindSimilar={(refresh, platform) => void fetchSimilar(question, refresh, platform)}
                   />
                 )}
               </div>
